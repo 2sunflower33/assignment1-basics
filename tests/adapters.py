@@ -13,7 +13,6 @@ from collections import defaultdict
 import json
 from pathlib import Path
 from collections import defaultdict
-# from datasets import load_dataset
 from typing import Optional, List, Iterator
 import torch.nn as nn 
 import math 
@@ -309,14 +308,17 @@ class MultiheadSelfAttentionWithRoPE(nn.Module):
         assert d_model % num_heads == 0
         d_k = d_model
         d_v = d_model
-        self.linear_qkv = Linear(d_model, d_k+d_k+d_v)
-        self.linear_o = Linear(d_v, d_model)
+        self.q_proj = Linear(d_model, d_k)
+        self.k_proj = Linear(d_model, d_k)
+        self.v_proj = Linear(d_model, d_v)
+        self.output_proj = Linear(d_v, d_model)
         self.rope =  RotaryPositionalEmbedding(theta, d_model // num_heads, max_seq_len)
 
     
     def forward(self, x:torch.Tensor, positions):
-        QKV = self.linear_qkv(x) # output size: d_k + d_k + d_v    
-        Q, K, V = QKV.chunk(3, -1)
+        Q = self.q_proj(x)
+        K = self.k_proj(x)
+        V = self.v_proj(x)
         Q_mh = rearrange(Q, "... seq_len (h d) -> ... h seq_len d", h = self.num_heads) # Q: ... seq_len h d_mh
         K_mh = rearrange(K, "... seq_len (h d) -> ... h seq_len d", h = self.num_heads)
         V_mh = rearrange(V, "... seq_len (h d) -> ... h seq_len d", h = self.num_heads)
@@ -330,7 +332,7 @@ class MultiheadSelfAttentionWithRoPE(nn.Module):
 
         mh_atten = dot_product_atten(Q_mh_rope, K_mh_rope, V_mh, mask) # ... h, seq_len, d_v
         mh_atten = rearrange(mh_atten, "... h seq_len d -> ... seq_len (h d)") # ... seq_len, d_model
-        return self.linear_o(mh_atten)
+        return self.output_proj(mh_atten)
     
 
 def run_multihead_self_attention_with_rope(
@@ -372,8 +374,10 @@ def run_multihead_self_attention_with_rope(
     """
     mh_atten_rope = MultiheadSelfAttentionWithRoPE(d_model, num_heads, max_seq_len, theta)
     mh_atten_rope.load_state_dict({
-        'linear_qkv.weight': torch.cat((q_proj_weight, k_proj_weight, v_proj_weight), dim=0),
-        'linear_o.weight': o_proj_weight
+        'q_proj.weight': q_proj_weight,
+        'k_proj.weight': k_proj_weight,
+        'v_proj.weight': v_proj_weight,
+        'output_proj.weight': o_proj_weight
     })
     return mh_atten_rope(in_features, token_positions)
 
@@ -585,17 +589,18 @@ def run_transformer_block(
         running the Transformer block on the input features while using RoPE.
     """
     transformer = Transformer(d_model, num_heads, d_ff, max_seq_len, theta)
-    transformer.load_state_dict(
-        {
-        'attn.linear_qkv.weight': torch.cat((weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight']), dim=0),
-        'attn.linear_o.weight': weights['attn.output_proj.weight'],
-        'ln1.weight': weights['ln1.weight'],
-        'ln2.weight': weights['ln2.weight'],
-        'ffn.w1.weight': weights['ffn.w1.weight'],
-        'ffn.w2.weight': weights['ffn.w2.weight'],
-        'ffn.w3.weight': weights['ffn.w3.weight'],
-        }
-    )
+    transformer.load_state_dict(weights)
+    # transformer.load_state_dict(
+    #     {
+    #     'attn.linear_qkv.weight': torch.cat((weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight']), dim=0),
+    #     'attn.linear_o.weight': weights['attn.output_proj.weight'],
+    #     'ln1.weight': weights['ln1.weight'],
+    #     'ln2.weight': weights['ln2.weight'],
+    #     'ffn.w1.weight': weights['ffn.w1.weight'],
+    #     'ffn.w2.weight': weights['ffn.w2.weight'],
+    #     'ffn.w3.weight': weights['ffn.w3.weight'],
+    #     }
+    # )
     batch_size, seq_len, _ = in_features.shape
     token_positions = torch.arange(seq_len, device=in_features.device).expand(batch_size, -1)
     return transformer(in_features, token_positions)
@@ -946,6 +951,9 @@ def get_tokenizer(
     """
 
     return Tokenizer(vocab, merges, special_tokens)
+
+
+# from datasets import load_dataset
 
 def run_train_bpe(
     input_path: str | os.PathLike,
