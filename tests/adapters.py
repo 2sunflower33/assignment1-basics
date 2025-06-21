@@ -590,26 +590,26 @@ def run_transformer_block(
     """
     transformer = Transformer(d_model, num_heads, d_ff, max_seq_len, theta)
     transformer.load_state_dict(weights)
-    # transformer.load_state_dict(
-    #     {
-    #     'attn.linear_qkv.weight': torch.cat((weights['attn.q_proj.weight'], weights['attn.k_proj.weight'], weights['attn.v_proj.weight']), dim=0),
-    #     'attn.linear_o.weight': weights['attn.output_proj.weight'],
-    #     'ln1.weight': weights['ln1.weight'],
-    #     'ln2.weight': weights['ln2.weight'],
-    #     'ffn.w1.weight': weights['ffn.w1.weight'],
-    #     'ffn.w2.weight': weights['ffn.w2.weight'],
-    #     'ffn.w3.weight': weights['ffn.w3.weight'],
-    #     }
-    # )
+
     batch_size, seq_len, _ = in_features.shape
     token_positions = torch.arange(seq_len, device=in_features.device).expand(batch_size, -1)
     return transformer(in_features, token_positions)
 
-# class TranformerLM(nn.Module):
-#     def __init__(self, vocab_size, d_model, context_length, num_layers, num_heads, d_ff, rope_theta):
-#         super().__init__()
-#         self.embedding = Embedding(vocab_size, d_model)
-#         for i in range(num_layers):
+class TranformerLM(nn.Module):
+    def __init__(self, vocab_size, d_model, context_length, num_layers, num_heads, d_ff, rope_theta):
+        super().__init__()
+        self.token_embeddings = Embedding(vocab_size, d_model)
+        self.layers = nn.ModuleList([Transformer(d_model, num_heads, d_ff, context_length, rope_theta) for _ in range(num_layers)])
+        self.ln_final = RMSNorm(d_model)
+        self.lm_head = Linear(d_model, vocab_size)
+    def forward(self, x):
+        batch_size, seq_len = x.shape
+        token_positions = torch.arange(seq_len).expand(batch_size, -1)
+        x = self.token_embeddings(x)
+        for transformer in self.layers:
+            x = transformer(x, token_positions)
+        return  self.lm_head( self.ln_final (x))
+
             
 def run_transformer_lm(
     vocab_size: int,
@@ -690,7 +690,9 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-
+    transformer_lm = TranformerLM(vocab_size, d_model, context_length, num_layers, num_heads, d_ff, rope_theta)
+    transformer_lm.load_state_dict(weights)
+    return transformer_lm(in_indices)
 
 def run_get_batch(
     dataset: npt.NDArray, batch_size: int, context_length: int, device: str
