@@ -610,7 +610,30 @@ class TranformerLM(nn.Module):
             x = transformer(x, token_positions)
         return  self.lm_head( self.ln_final (x))
 
-            
+# Number of parameters:
+# embedding: vocab_size * d_model
+# norm: d_model
+# causal mt attention with RoPE: 3*d_model*d_model for kvq proj, d_model*d_model for output_proj
+# SwiGLU: 3*d_model*d_ff
+# Transformer block: (4*d_model**2 + 3*d_model*d_ff + 2*d_model) = n_trans
+# Transformer LM: num_layers*n_trans + d_model * vocab_size
+# 2b parameters in total
+
+# 4 bytes per single precision floating number (float32) -> 8GB
+
+# Number of matrix multiply FLOP needed for a forward pass
+# embedding: indexing of seq_len
+# causal mt attention: 4* (2*context_len*d_model*d_model) for projection
+# scaled dot product attention: 2 * (2*context_len*context_len*d_model)
+# SwiGLU: 3* (2*context_len*d_model*d_ff)
+# 4T FLOPs for each forward pass
+
+# The FFN SwiGLU needs most FLOPs
+
+# As model gets larger, FFN takes proportionaly more FLOPs
+
+# With increasing context length, attention takes more FLOPs  
+
 def run_transformer_lm(
     vocab_size: int,
     context_length: int,
