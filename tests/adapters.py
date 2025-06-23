@@ -758,11 +758,19 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
 
 def cross_entropy(inputs, targets):
     B = inputs.shape[0]
-    max_logits = inputs.max(-1).values.unsqueeze(-1)
+    max_logits = inputs.max(-1, keepdim=True).values
     shifted_logits = inputs - max_logits
-    nll = - inputs[torch.arange(B), targets] + max_logits
-    logsumexp = torch.log( shifted_logits.exp().sum(-1))
-    return (nll + logsumexp).mean() 
+    log_prob = shifted_logits - torch.log( shifted_logits.exp().sum(-1, keepdim=True))
+    target_log_prob = log_prob[torch.arange(B), targets]
+    return -target_log_prob.mean() 
+
+
+def cross_entropy_seq(inputs: Float[Tensor, "batch_size seq_len vocab_size"], targets: Int[Tensor, "batch_size, seq_len"]) -> Float[Tensor, ""]:
+    max_logits = inputs.max(-1, keepdim=True).values
+    shifted_logits = inputs - max_logits
+    log_prob = shifted_logits - torch.log(shifted_logits.exp().sum(-1))
+    target_log_prob = log_prob.gather(-1, targets.unsqueeze(-1)).squeeze(-1)
+    return -target_log_prob.mean()
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy
