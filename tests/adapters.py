@@ -52,8 +52,6 @@ def run_embedding(
     embedding_layer.load_state_dict({'weight': weights})
     return embedding_layer.forward(token_ids)
 
-
-
 class Linear(nn.Module):
     def __init__(self, in_features:int, out_features:int, device=None, dtype=None):
         super().__init__()
@@ -758,6 +756,13 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
     """
     return softmax(in_features, dim)
 
+def cross_entropy(inputs, targets):
+    B = inputs.shape[0]
+    max_logits = inputs.max(-1).values.unsqueeze(-1)
+    shifted_logits = inputs - max_logits
+    nll = - inputs[torch.arange(B), targets] + max_logits
+    logsumexp = torch.log( shifted_logits.exp().sum(-1))
+    return (nll + logsumexp).mean() 
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy
@@ -772,7 +777,7 @@ def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: 
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    raise NotImplementedError
+    return cross_entropy(inputs, targets)
 
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
